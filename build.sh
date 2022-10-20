@@ -6,4 +6,4 @@ logInfoMessage "I'll scan the Dockerfile  available at [${WORKSPACE}${CODEBASE_D
 sleep  $SLEEP_DURATION
 cd  $WORKSPACE/${CODEBASE_DIR}
 
-hadoling ${DOCKERFILE_PATH}
+hadolint ${DOCKERFILE_PATH}
