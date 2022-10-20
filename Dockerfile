@@ -1,5 +1,8 @@
 FROM hadolint/hadolint:latest-alpine
 
+RUN apk add --no-cache --upgrade bash
+RUN apk add jq
+
 COPY build.sh .
 COPY BP-BASE-SHELL-STEPS/functions.sh .
 
