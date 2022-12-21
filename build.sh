@@ -1,5 +1,6 @@
 #!/bin/bash
 source functions.sh
+source log-functions.sh
 
 logInfoMessage "I'll scan the Dockerfile  available at [${WORKSPACE}${CODEBASE_DIR}]"
 
