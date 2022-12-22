@@ -1,12 +1,14 @@
 #!/bin/bash
 source functions.sh
+source log-functions.sh
 
 logInfoMessage "I'll scan the Dockerfile  available at [${WORKSPACE}${CODEBASE_DIR}]"
 
 sleep  $SLEEP_DURATION
 cd  $WORKSPACE/${CODEBASE_DIR}
 
-hadolint ${DOCKERFILE_PATH}
+mkdir report | true
+hadolint ${DOCKERFILE_PATH} 2>&1 | tee -a report/linting_result.json
 
 if [ $? -eq 0 ]
 then
