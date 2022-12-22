@@ -7,7 +7,7 @@ logInfoMessage "I'll scan the Dockerfile  available at [${WORKSPACE}${CODEBASE_D
 sleep  $SLEEP_DURATION
 cd  $WORKSPACE/${CODEBASE_DIR}
 
-mkdir report
+mkdir report | true
 hadolint ${DOCKERFILE_PATH} 2>&1 | tee -a report/linting_result.json
 
 if [ $? -eq 0 ]
