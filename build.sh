@@ -18,10 +18,12 @@ then
   generateOutput mvn_execute true "Congratulations docker lint scan succeeded!!!"
 elif [ "$VALIDATION_FAILURE_ACTION" == "FAILURE" ]
   then
+    logErrorMessage "$DOCKERFILE_PATH: No such file or directory exist"
     logErrorMessage "Please check docker lint scan failed!!!"
     generateOutput $ACTIVITY_SUB_TASK_CODE false "Please check docker lint scan failed!!!"
     exit 1
    else
+    logErrorMessage "$DOCKERFILE_PATH: No such file or directory exist"
     logWarningMessage "Please check docker lint scan failed!!!"
     generateOutput $ACTIVITY_SUB_TASK_CODE true "Please check docker lint scan failed!!!"
 fi
