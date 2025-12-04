@@ -36,8 +36,8 @@ DOCKERFILE_PATH=$(dockerfile_path)
 DOCKERFILE_NAME="${DOCKERFILE_PATH%%:*}"
 DOCKERFILE_DIR="${DOCKERFILE_PATH##*:}"
 
-echo "Detected Dockerfile Name: $DOCKERFILE_NAME"
-echo "Detected Dockerfile Directory: $DOCKERFILE_DIR"
+logInfoMessage "Detected Dockerfile Name: $DOCKERFILE_NAME"
+logInfoMessage "Detected Dockerfile Directory: $DOCKERFILE_DIR"
 
 DOCKERFILE_FULL_PATH="$DOCKERFILE_DIR/$DOCKERFILE_NAME"
 
