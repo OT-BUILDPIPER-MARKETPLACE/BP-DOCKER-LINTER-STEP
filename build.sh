@@ -1,82 +1,80 @@
 #!/bin/bash
 set -euo pipefail
 
-# ==============================================================================
-#  Load BuildPiper Base Functions
-# ==============================================================================
+
+if [ "$DEBUG" = true ]; then
+  set -x
+fi
+
 source /opt/buildpiper/shell-functions/functions.sh
 source /opt/buildpiper/shell-functions/log-functions.sh
 source /opt/buildpiper/shell-functions/file-functions.sh
 source /opt/buildpiper/shell-functions/str-functions.sh
 source /opt/buildpiper/shell-functions/getDataFile.sh
 
-# ==============================================================================
-#  Environment
-# ==============================================================================
+
 CODEBASE_LOCATION="${WORKSPACE}/${CODEBASE_DIR}"
 REPORTS_DIR="${CODEBASE_LOCATION}/reports"
 EXEC_DIR="/bp/execution_dir/${GLOBAL_TASK_ID}"
 
+sleep  $SLEEP_DURATION
 MERGED_JSON="${REPORTS_DIR}/docker_lint.json"
 MERGED_CSV="${REPORTS_DIR}/docker_lint.csv"
 
 mkdir -p "${REPORTS_DIR}"
 chmod -R 0777 "${REPORTS_DIR}" || true
 
+
+
+function dockerfile_path() {
+  COMPONENT_NAME=$(jq -r .build_detail.dockerfile_path < /bp/data/environment_build )
+  echo "$COMPONENT_NAME"
+}
+
+DOCKERFILE_PATH=$(dockerfile_path)
+
+DOCKERFILE_NAME="${DOCKERFILE_PATH%%:*}"
+DOCKERFILE_DIR="${DOCKERFILE_PATH##*:}"
+
+echo "Detected Dockerfile Name: $DOCKERFILE_NAME"
+echo "Detected Dockerfile Directory: $DOCKERFILE_DIR"
+
+DOCKERFILE_FULL_PATH="$DOCKERFILE_DIR/$DOCKERFILE_NAME"
+
+
 logInfoMessage "=============================================================="
 logInfoMessage " Starting Dockerfile Linting (Hadolint)"
 logInfoMessage "=============================================================="
 logInfoMessage " Codebase location : ${CODEBASE_LOCATION}"
 logInfoMessage " Reports directory : ${REPORTS_DIR}"
-logInfoMessage " Dockerfile path   : ${DOCKERFILE_PATH}"
+logInfoMessage " Dockerfile path   : ${DOCKERFILE_FULL_PATH}"
 logInfoMessage "=============================================================="
 
-# ==============================================================================
-#  Validate dockerfile exists
-# ==============================================================================
-if [[ ! -f "${CODEBASE_LOCATION}/${DOCKERFILE_PATH}" ]]; then
+if [[ ! -f "${CODEBASE_LOCATION}/${DOCKERFILE_FULL_PATH}" ]]; then
     logWarningMessage "Dockerfile not found at ${CODEBASE_LOCATION}/${DOCKERFILE_PATH}"
-    mkdir -p "${EXEC_DIR}"
-    echo "{}" > "${MERGED_JSON}"
-    echo "rule,level,message,line,column" > "${MERGED_CSV}"
-    cp -f "${MERGED_JSON}" "${EXEC_DIR}/"
-    cp -f "${MERGED_CSV}" "${EXEC_DIR}/"
-    exit 0
+    exit 1
 fi
 
-DOCKERFILE_FULL_PATH="${CODEBASE_LOCATION}/${DOCKERFILE_PATH}"
 
-# ==============================================================================
-#  Run Hadolint
-# ==============================================================================
 RAW_JSON="${REPORTS_DIR}/docker_lint_raw.json"
 
 logInfoMessage "Running hadolint..."
 set +e
 hadolint "${DOCKERFILE_FULL_PATH}" --format json > "${RAW_JSON}" 2>/tmp/hadolint.stderr
-EXIT_CODE=$?
+TASK_STATUS=$?
 set -e
 
 chmod 777 "${RAW_JSON}"
 
-# ==============================================================================
-#  If hadolint crashed OR returned empty json
-# ==============================================================================
 if [[ ! -s "${RAW_JSON}" ]]; then
     logWarningMessage "Hadolint returned empty output, creating skeleton JSON"
     echo "[]" > "${RAW_JSON}"
 fi
 
-# ==============================================================================
-#  Count issues
-# ==============================================================================
 ISSUE_COUNT=$(jq 'length' "${RAW_JSON}" 2>/dev/null || echo 0)
 
 logInfoMessage "Found ${ISSUE_COUNT} issue(s) in Dockerfile."
 
-# ==============================================================================
-#  Build CSV
-# ==============================================================================
 echo "rule,level,message,line,column" > "${MERGED_CSV}"
 chmod 777 "${MERGED_CSV}"
 
@@ -93,9 +91,6 @@ jq -r '
 
 chmod 777 "${MERGED_CSV}"
 
-# ==============================================================================
-#  Build final JSON
-# ==============================================================================
 logInfoMessage "Building final JSON report..."
 
 jq -n \
@@ -106,34 +101,9 @@ jq -n \
     }' > "${MERGED_JSON}"
 
 chmod 777 "${MERGED_JSON}"
-
-# ==============================================================================
-#  Copy to execution directory
-# ==============================================================================
-mkdir -p "${EXEC_DIR}"
 cp -f "${MERGED_JSON}" "${EXEC_DIR}/"
 cp -f "${MERGED_CSV}" "${EXEC_DIR}/"
 
-# ==============================================================================
-#  Determine Pass/Fail
-# ==============================================================================
-if [[ $EXIT_CODE -eq 0 ]]; then
-    logInfoMessage "Docker Lint succeeded with no severe violations."
-    generateOutput docker_lint true "Docker lint scan succeeded."
-else
-    if [[ "${VALIDATION_FAILURE_ACTION}" == "FAILURE" ]]; then
-        logErrorMessage "Docker lint scan failed!"
-        generateOutput docker_lint false "Docker lint scan failed."
-        exit 1
-    else
-        logWarningMessage "Docker lint reported issues but allowed to proceed (VALIDATION_FAILURE_ACTION=WARNING)"
-        generateOutput docker_lint true "Docker lint scan completed with warnings."
-    fi
-fi
 
-logInfoMessage "=============================================================="
-logInfoMessage " Dockerfile Linting Step Completed"
-logInfoMessage "=============================================================="
-
-exit 0
-
+TASK_STATUS=$?
+saveTaskStatus ${TASK_STATUS} ${ACTIVITY_SUB_TASK_CODE}
