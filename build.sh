@@ -1,16 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
-
-if [ "$DEBUG" = true ]; then
-  set -x
-fi
-
 source /opt/buildpiper/shell-functions/functions.sh
 source /opt/buildpiper/shell-functions/log-functions.sh
 source /opt/buildpiper/shell-functions/file-functions.sh
 source /opt/buildpiper/shell-functions/str-functions.sh
 source /opt/buildpiper/shell-functions/getDataFile.sh
+
+
+if [ "$DEBUG" = true ]; then
+  set -x
+fi
 
 
 CODEBASE_LOCATION="${WORKSPACE}/${CODEBASE_DIR}"
