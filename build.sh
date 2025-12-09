@@ -30,6 +30,7 @@ function dockerfile_path() {
   echo "$COMPONENT_NAME"
 }
 
+DOCKERFILE_PATH=$(dockerfile_path)
 
 if [[ -z "$DOCKERFILE_PATH" ]]; then
     logErrorMessage "By default Dockerfile path not found. Please mention the Dockerfile path in variable DOCKERFILE_PATH."
@@ -38,7 +39,6 @@ else
     logInfoMessage "Dockerfile Path: $DOCKERFILE_PATH"
 fi
 
-DOCKERFILE_PATH=$(dockerfile_path)
 
 DOCKERFILE_NAME="${DOCKERFILE_PATH%%:*}"
 DOCKERFILE_DIR="${DOCKERFILE_PATH##*:}"
