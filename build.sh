@@ -1,5 +1,4 @@
 #!/bin/bash
-set -euo pipefail
 
 source /opt/buildpiper/shell-functions/functions.sh
 source /opt/buildpiper/shell-functions/log-functions.sh
