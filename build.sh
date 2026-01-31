@@ -67,6 +67,7 @@ RAW_JSON="${REPORTS_DIR}/docker_lint_raw.json"
 
 logInfoMessage "Running hadolint..."
 set +e
+logInfoMessage "hadolint "${DOCKERFILE_FULL_PATH}" --format json > "${RAW_JSON}""
 hadolint "${DOCKERFILE_FULL_PATH}" --format json > "${RAW_JSON}" 2>/tmp/hadolint.stderr
 TASK_STATUS=$?
 set -e
