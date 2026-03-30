@@ -12,11 +12,16 @@ RUN addgroup -g 65522 buildpiper && \
       /home/buildpiper/reports \
       /usr/local/bin \
       /src/reports \
+      /opt/venv \
     && chown -R buildpiper:buildpiper \
       /app /bp /opt /home/buildpiper /src /usr/local/bin /tmp
 
-RUN apk add --no-cache bash jq curl git gettext libintl
+RUN apk add --no-cache bash jq curl git gettext libintl python3 py3-pip py3-virtualenv
 
+RUN python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir tabulate
+
+ENV PATH="/opt/venv/bin:$PATH"
 ENV SLEEP_DURATION=5s
 
 WORKDIR /app
@@ -30,4 +35,3 @@ RUN chmod +x /app/build.sh
 USER buildpiper
 
 ENTRYPOINT ["./build.sh"]
-
