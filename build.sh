@@ -12,10 +12,6 @@ source /opt/buildpiper/shell-functions/getDataFile.sh
 #       appear correctly in the UI.
 # ---------------------------------------------------------------
 
-if [ "$DEBUG" = true ]; then
-  set -x
-fi
-
 DOCKER_LINTER_OUTPUT_FILE="${DOCKER_LINTER_OUTPUT_FILE:-${ACTIVITY_SUB_TASK_CODE}_output.json}"
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -31,6 +27,9 @@ RAW_JSON="docker_lint_raw.json"
 SLEEP_DURATION="${SLEEP_DURATION:-0}"
 HADOLINT_FAIL_THRESHOLD="${HADOLINT_FAIL_THRESHOLD:-error}"
 
+# Strip any non-numeric suffix (e.g. "0s" -> "0")
+SLEEP_DURATION_INT=$(echo "${SLEEP_DURATION}" | tr -d 's')
+
 logInfoMessage "> Starting step: docker_linter"
 logInfoMessage "> Codebase location: ${CODEBASE_LOCATION}"
 
@@ -38,9 +37,9 @@ add_event "INITIALIZATION" "Successful" \
     "Docker linter step initialized" \
     "Codebase: ${CODEBASE_DIR} | Workspace: ${WORKSPACE}"
 
-if [ "${SLEEP_DURATION}" -gt 0 ]; then
-    logInfoMessage "> Sleeping for ${SLEEP_DURATION} second(s)..."
-    sleep "$SLEEP_DURATION"
+if [ "${SLEEP_DURATION_INT}" -gt 0 ]; then
+    logInfoMessage "> Sleeping for ${SLEEP_DURATION_INT} second(s)..."
+    sleep "${SLEEP_DURATION_INT}"
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
