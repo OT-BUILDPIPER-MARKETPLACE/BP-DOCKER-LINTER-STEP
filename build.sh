@@ -6,48 +6,22 @@ source /opt/buildpiper/shell-functions/file-functions.sh
 source /opt/buildpiper/shell-functions/str-functions.sh
 source /opt/buildpiper/shell-functions/getDataFile.sh
 
+# ---------------------------------------------------------------
+# NOTE: ACTIVITY_SUB_TASK_CODE is managed by the BuildPiper
+#       environment. Do NOT override it here to ensure events
+#       appear correctly in the UI.
+# ---------------------------------------------------------------
+
 if [ "$DEBUG" = true ]; then
   set -x
 fi
 
-###############################################
-### EVENTS TRACKING
-###############################################
-EVENTS='{}'
-
-add_event() {
-  local key="${1:-}"
-  local status="${2:-}"
-  local reason="${3:-}"
-  local message="${4:-}"
-
-  if [ -z "$key" ] || [ -z "$status" ]; then
-    logErrorMessage "add_event requires at least 'key' and 'status' parameters"
-    return 1
-  fi
-
-  key="$(echo "$key" | tr '_' ' ' | tr '-' ' ' | tr '[:upper:]' '[:lower:]')"
-
-  EVENTS=$(jq \
-    --arg k "$key" \
-    --arg status "$status" \
-    --arg reason "$reason" \
-    --arg message "$message" \
-    '. + {($k): {status: $status, reason: $reason, message: $message}}' \
-    <<< "$EVENTS") || {
-    logErrorMessage "Failed to add event to EVENTS JSON"
-    return 1
-  }
-}
-
-###############################################
-### OUTPUT FILE
-###############################################
 DOCKER_LINTER_OUTPUT_FILE="${DOCKER_LINTER_OUTPUT_FILE:-${ACTIVITY_SUB_TASK_CODE}_output.json}"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Configuration
+# Configuration & Initialization
 # ──────────────────────────────────────────────────────────────────────────────
+WORKSPACE="${WORKSPACE:-/bp/workspace}"
 CODEBASE_LOCATION="${WORKSPACE}/${CODEBASE_DIR}"
 EXEC_DIR="/bp/execution_dir/${GLOBAL_TASK_ID}"
 MERGED_JSON="docker_lint.json"
@@ -57,31 +31,39 @@ RAW_JSON="docker_lint_raw.json"
 SLEEP_DURATION="${SLEEP_DURATION:-0}"
 HADOLINT_FAIL_THRESHOLD="${HADOLINT_FAIL_THRESHOLD:-error}"
 
-sleep "$SLEEP_DURATION"
+logInfoMessage "> Starting step: docker_linter"
+logInfoMessage "> Codebase location: ${CODEBASE_LOCATION}"
+
+add_event "INITIALIZATION" "Successful" \
+    "Docker linter step initialized" \
+    "Codebase: ${CODEBASE_DIR} | Workspace: ${WORKSPACE}"
+
+if [ "${SLEEP_DURATION}" -gt 0 ]; then
+    logInfoMessage "> Sleeping for ${SLEEP_DURATION} second(s)..."
+    sleep "$SLEEP_DURATION"
+fi
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Get Dockerfile path from build config
+# Dockerfile Path Resolution
 # ──────────────────────────────────────────────────────────────────────────────
 function dockerfile_path() {
   jq -r '.build_detail.dockerfile_path // empty' < /bp/data/environment_build
 }
 
+logInfoMessage "> Resolving Dockerfile path from configuration..."
 DOCKERFILE_PATH=$(dockerfile_path)
 
 if [[ -z "$DOCKERFILE_PATH" ]]; then
-    logErrorMessage "Dockerfile path not found in build configuration."
-    add_event "dockerfile path" "Failed" "Path not found" "dockerfile_path not set in build_detail"
+    logErrorMessage "> Dockerfile path not found in build configuration"
+    add_event "DOCKERFILE_RESOLUTION" "Failed" \
+        "Path not found in build details" \
+        "dockerfile_path not set in build_detail"
     generateOutput "${ACTIVITY_SUB_TASK_CODE}" false \
         "Dockerfile path missing in configuration. Set 'dockerfile_path' in build_detail."
     saveTaskStatus 1 "${ACTIVITY_SUB_TASK_CODE}"
     exit 1
 fi
 
-logInfoMessage "Dockerfile Path from config: ${DOCKERFILE_PATH}"
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Parse Dockerfile name and directory
-# ──────────────────────────────────────────────────────────────────────────────
 if [[ "$DOCKERFILE_PATH" == *:* ]]; then
     DOCKERFILE_NAME="${DOCKERFILE_PATH%%:*}"
     DOCKERFILE_DIR="${DOCKERFILE_PATH##*:}"
@@ -92,66 +74,82 @@ fi
 
 DOCKERFILE_FULL_PATH="${DOCKERFILE_DIR}/${DOCKERFILE_NAME}"
 
-logInfoMessage "Detected Dockerfile Name: ${DOCKERFILE_NAME}"
-logInfoMessage "Detected Dockerfile Directory: ${DOCKERFILE_DIR}"
-logInfoMessage "Full Dockerfile Path: ${DOCKERFILE_FULL_PATH}"
+logInfoMessage "> Dockerfile Name: ${DOCKERFILE_NAME}"
+logInfoMessage "> Dockerfile Dir : ${DOCKERFILE_DIR}"
+logInfoMessage "> Full Path      : ${DOCKERFILE_FULL_PATH}"
 
-add_event "dockerfile path" "Successful" "Path resolved" "Dockerfile resolved to ${DOCKERFILE_FULL_PATH}"
+add_event "DOCKERFILE_RESOLUTION" "Successful" \
+    "Path resolved successfully" \
+    "Dockerfile: ${DOCKERFILE_FULL_PATH}"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Validate Dockerfile exists
+# Workspace Navigation & Validation
 # ──────────────────────────────────────────────────────────────────────────────
-logInfoMessage "=============================================================="
-logInfoMessage " Starting Dockerfile Linting (Hadolint)"
-logInfoMessage "=============================================================="
-logInfoMessage " Codebase location : ${CODEBASE_LOCATION}"
-logInfoMessage " Dockerfile path   : ${DOCKERFILE_FULL_PATH}"
-logInfoMessage " Fail threshold    : ${HADOLINT_FAIL_THRESHOLD}"
-logInfoMessage "=============================================================="
+logInfoMessage "> Navigating to codebase directory..."
 
 cd "${CODEBASE_LOCATION}" || {
-    logErrorMessage "Failed to change directory to: ${CODEBASE_LOCATION}"
-    add_event "codebase directory" "Failed" "Directory not found" "${CODEBASE_LOCATION} does not exist"
-    generateOutput "${ACTIVITY_SUB_TASK_CODE}" false \
-        "Codebase directory not found: ${CODEBASE_LOCATION}"
+    logErrorMessage "> Failed to navigate to codebase directory: ${CODEBASE_LOCATION}"
+    add_event "WORKSPACE_NAVIGATION" "Failed" \
+        "Directory not found" \
+        "Path: ${CODEBASE_LOCATION}"
+    generateOutput "${ACTIVITY_SUB_TASK_CODE}" false "Codebase directory not found: ${CODEBASE_LOCATION}"
     saveTaskStatus 1 "${ACTIVITY_SUB_TASK_CODE}"
     exit 1
 }
 
-add_event "codebase directory" "Successful" "Directory found" "Changed to ${CODEBASE_LOCATION}"
+logInfoMessage "> Successfully navigated to: ${CODEBASE_LOCATION}"
+add_event "WORKSPACE_NAVIGATION" "Successful" "Navigated to codebase" "Path: ${CODEBASE_LOCATION}"
 
 if [[ ! -f "${DOCKERFILE_FULL_PATH}" ]]; then
-    logErrorMessage "Dockerfile not found at: ${CODEBASE_LOCATION}/${DOCKERFILE_FULL_PATH}"
-    add_event "dockerfile found" "Failed" "File not found" "Dockerfile not found at ${DOCKERFILE_FULL_PATH}"
-    generateOutput "${ACTIVITY_SUB_TASK_CODE}" false \
-        "Dockerfile not found at path: ${DOCKERFILE_FULL_PATH}"
+    logErrorMessage "> Dockerfile not found at: ${CODEBASE_LOCATION}/${DOCKERFILE_FULL_PATH}"
+    add_event "FILE_VALIDATION" "Failed" \
+        "Dockerfile does not exist" \
+        "Expected at: ${DOCKERFILE_FULL_PATH}"
+    generateOutput "${ACTIVITY_SUB_TASK_CODE}" false "Dockerfile not found at path: ${DOCKERFILE_FULL_PATH}"
     saveTaskStatus 1 "${ACTIVITY_SUB_TASK_CODE}"
     exit 1
 fi
 
-logInfoMessage "Dockerfile found. Size: $(stat -c%s "${DOCKERFILE_FULL_PATH}" 2>/dev/null || echo 'unknown') bytes"
-add_event "dockerfile found" "Successful" "File exists" "Dockerfile found at ${DOCKERFILE_FULL_PATH}"
+logInfoMessage "> Dockerfile found. Size: $(stat -c%s "${DOCKERFILE_FULL_PATH}" 2>/dev/null || echo 'unknown') bytes"
+add_event "FILE_VALIDATION" "Successful" "Dockerfile exists" "Path: ${DOCKERFILE_FULL_PATH}"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Check Hadolint is installed
+# Tool Verification (Hadolint)
 # ──────────────────────────────────────────────────────────────────────────────
+logInfoMessage "> Verifying Hadolint installation..."
+
 if ! command -v hadolint &> /dev/null; then
-    logErrorMessage "Hadolint binary not found. Please ensure Hadolint is installed."
-    add_event "hadolint installation" "Failed" "Binary not found" "hadolint not available in PATH"
-    generateOutput "${ACTIVITY_SUB_TASK_CODE}" false \
-        "Hadolint binary not found. Install Hadolint or use a different Docker image."
+    logErrorMessage "> Hadolint binary not found in PATH"
+    add_event "TOOL_VERIFICATION" "Failed" \
+        "Hadolint not installed" \
+        "Check base image dependencies"
+    generateOutput "${ACTIVITY_SUB_TASK_CODE}" false "Hadolint binary not found. Install Hadolint or use a different Docker image."
     saveTaskStatus 1 "${ACTIVITY_SUB_TASK_CODE}"
     exit 1
 fi
 
 HADOLINT_VERSION=$(hadolint --version | head -1 || echo "unknown")
-logInfoMessage "Using Hadolint: ${HADOLINT_VERSION}"
-add_event "hadolint installation" "Successful" "Binary found" "${HADOLINT_VERSION}"
+logInfoMessage "> Using Hadolint: ${HADOLINT_VERSION}"
+add_event "TOOL_VERIFICATION" "Successful" "Binary found" "Version: ${HADOLINT_VERSION}"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Run Hadolint
+# Hadolint Execution
 # ──────────────────────────────────────────────────────────────────────────────
-logInfoMessage "Running hadolint on: ${DOCKERFILE_FULL_PATH}"
+echo ""
+echo "> Hadolint Execution Summary"
+printf '+%-30s+%-50s+\n' '------------------------------' '--------------------------------------------------'
+printf '| %-28s | %-48s |\n' "Parameter" "Value"
+printf '+%-30s+%-50s+\n' '------------------------------' '--------------------------------------------------'
+printf '| %-28s | %-48s |\n' "Codebase" "${CODEBASE_DIR}"
+printf '+%-30s+%-50s+\n' '------------------------------' '--------------------------------------------------'
+printf '| %-28s | %-48s |\n' "Dockerfile" "${DOCKERFILE_FULL_PATH}"
+printf '+%-30s+%-50s+\n' '------------------------------' '--------------------------------------------------'
+printf '| %-28s | %-48s |\n' "Threshold" "${HADOLINT_FAIL_THRESHOLD}"
+printf '+%-30s+%-50s+\n' '------------------------------' '--------------------------------------------------'
+echo ""
+
+logInfoMessage "> Starting Hadolint scan..."
+add_event "HADOLINT_SCAN_START" "Successful" "Initiating Dockerfile scan" "Target: ${DOCKERFILE_FULL_PATH}"
 
 set +e
 hadolint "${DOCKERFILE_FULL_PATH}" --format json > "${RAW_JSON}" 2>/tmp/hadolint.stderr
@@ -159,25 +157,24 @@ HADOLINT_EXIT_CODE=$?
 set -e
 
 if [[ -s /tmp/hadolint.stderr ]]; then
-    logWarningMessage "Hadolint stderr output:"
+    logWarningMessage "> Hadolint stderr output:"
     cat /tmp/hadolint.stderr
 fi
 
-logInfoMessage "Hadolint exit code: ${HADOLINT_EXIT_CODE}"
+logInfoMessage "> Hadolint completed with exit code: ${HADOLINT_EXIT_CODE}"
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Handle empty output
-# ──────────────────────────────────────────────────────────────────────────────
 if [[ ! -s "${RAW_JSON}" ]]; then
-    logWarningMessage "Hadolint returned empty output. Creating empty JSON array."
+    logWarningMessage "> Hadolint returned empty output. Creating empty JSON array."
     echo "[]" > "${RAW_JSON}"
 fi
 
 chmod 644 "${RAW_JSON}"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Count issues by severity
+# Metrics Processing
 # ──────────────────────────────────────────────────────────────────────────────
+logInfoMessage "> Processing scan results..."
+
 TOTAL_ISSUES=$(jq 'length' "${RAW_JSON}" 2>/dev/null || echo 0)
 ERROR_COUNT=$(jq '[.[] | select(.level == "error")] | length' "${RAW_JSON}" 2>/dev/null || echo 0)
 WARNING_COUNT=$(jq '[.[] | select(.level == "warning")] | length' "${RAW_JSON}" 2>/dev/null || echo 0)
@@ -185,28 +182,31 @@ INFO_COUNT=$(jq '[.[] | select(.level == "info")] | length' "${RAW_JSON}" 2>/dev
 STYLE_COUNT=$(jq '[.[] | select(.level == "style")] | length' "${RAW_JSON}" 2>/dev/null || echo 0)
 
 if [[ "$HADOLINT_EXIT_CODE" -eq 0 ]]; then
-    add_event "hadolint scan" "Successful" "No issues detected" "Hadolint completed — Dockerfile is clean"
+    add_event "HADOLINT_SCAN_RESULT" "Successful" "No issues detected" "Dockerfile is clean"
 else
-    add_event "hadolint scan" "Successful" "Issues detected" "Hadolint found ${TOTAL_ISSUES} issue(s)"
+    add_event "HADOLINT_SCAN_RESULT" "Successful" "Issues detected" "Hadolint found ${TOTAL_ISSUES} issue(s)"
 fi
 
-add_event "lint results" "Successful" "Issues counted" "Total=${TOTAL_ISSUES} Errors=${ERROR_COUNT} Warnings=${WARNING_COUNT} Info=${INFO_COUNT} Style=${STYLE_COUNT}"
+echo ""
+echo "> Scan Metrics Summary"
+printf '+%-30s+%-50s+\n' '------------------------------' '--------------------------------------------------'
+printf '| %-28s | %-48s |\n' "Metric" "Count"
+printf '+%-30s+%-50s+\n' '------------------------------' '--------------------------------------------------'
+printf '| %-28s | %-48s |\n' "Total Issues" "${TOTAL_ISSUES}"
+printf '+%-30s+%-50s+\n' '------------------------------' '--------------------------------------------------'
+printf '| %-28s | %-48s |\n' "Errors" "${ERROR_COUNT}"
+printf '+%-30s+%-50s+\n' '------------------------------' '--------------------------------------------------'
+printf '| %-28s | %-48s |\n' "Warnings" "${WARNING_COUNT}"
+printf '+%-30s+%-50s+\n' '------------------------------' '--------------------------------------------------'
+printf '| %-28s | %-48s |\n' "Info" "${INFO_COUNT}"
+printf '+%-30s+%-50s+\n' '------------------------------' '--------------------------------------------------'
+printf '| %-28s | %-48s |\n' "Style" "${STYLE_COUNT}"
+printf '+%-30s+%-50s+\n' '------------------------------' '--------------------------------------------------'
+echo ""
 
-logInfoMessage "=============================================================="
-logInfoMessage " Linting Results"
-logInfoMessage "=============================================================="
-logInfoMessage " Total issues  : ${TOTAL_ISSUES}"
-logInfoMessage " Errors        : ${ERROR_COUNT}"
-logInfoMessage " Warnings      : ${WARNING_COUNT}"
-logInfoMessage " Info          : ${INFO_COUNT}"
-logInfoMessage " Style         : ${STYLE_COUNT}"
-logInfoMessage "=============================================================="
-
-# ──────────────────────────────────────────────────────────────────────────────
 # Display issues in tabular format        
-# ──────────────────────────────────────────────────────────────────────────────
 if [[ ${TOTAL_ISSUES} -gt 0 ]]; then
-    logInfoMessage "Displaying Lint Issues:"
+    logInfoMessage "> Displaying Lint Issues Table:"
     echo "Rule,Level,Line,Message" > /tmp/hadolint_display.csv
     jq -r '
         .[] |
@@ -221,12 +221,11 @@ if [[ ${TOTAL_ISSUES} -gt 0 ]]; then
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Generate CSV report
+# Report Generation
 # ──────────────────────────────────────────────────────────────────────────────
-logInfoMessage "Generating CSV report..."
+logInfoMessage "> Generating CSV and JSON reports..."
 
 echo "rule,level,message,line,column" > "${MERGED_CSV}"
-
 jq -r '
     .[] |
     [
@@ -237,19 +236,12 @@ jq -r '
         (.column // 0)
     ] | @csv
 ' "${RAW_JSON}" >> "${MERGED_CSV}" 2>/dev/null || {
-    logWarningMessage "Failed to generate CSV from JSON. Using empty CSV."
+    logWarningMessage "> Failed to generate CSV from JSON. Using empty CSV."
 }
-
 chmod 644 "${MERGED_CSV}"
 
 CSV_LINE_COUNT=$(wc -l < "${MERGED_CSV}" 2>/dev/null || echo 1)
-logInfoMessage "CSV report generated with ${CSV_LINE_COUNT} lines (including header)."
-add_event "generate csv report" "Successful" "CSV created" "Report written with ${CSV_LINE_COUNT} lines"
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Generate final JSON report
-# ──────────────────────────────────────────────────────────────────────────────
-logInfoMessage "Building final JSON report..."
+add_event "REPORT_GENERATION" "Successful" "Reports created" "CSV lines: ${CSV_LINE_COUNT}"
 
 jq -n \
     --slurpfile issues "${RAW_JSON}" \
@@ -267,25 +259,17 @@ jq -n \
             style: ($issues[0] | [.[] | select(.level == "style")] | length)
         }
     }' > "${MERGED_JSON}"
-
 chmod 644 "${MERGED_JSON}"
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Copy reports to execution directory
-# ──────────────────────────────────────────────────────────────────────────────
-logInfoMessage "Copying reports to execution directory: ${EXEC_DIR}/"
-
+logInfoMessage "> Copying reports to execution directory: ${EXEC_DIR}/"
 mkdir -p "${EXEC_DIR}"
-cp -f "${MERGED_JSON}" "${EXEC_DIR}/" || logWarningMessage "Failed to copy JSON report"
-cp -f "${MERGED_CSV}" "${EXEC_DIR}/" || logWarningMessage "Failed to copy CSV report"
-
-logInfoMessage "Reports saved:"
-logInfoMessage " - ${EXEC_DIR}/${MERGED_JSON}"
-logInfoMessage " - ${EXEC_DIR}/${MERGED_CSV}"
+cp -f "${MERGED_JSON}" "${EXEC_DIR}/" || logWarningMessage "> Failed to copy JSON report"
+cp -f "${MERGED_CSV}" "${EXEC_DIR}/" || logWarningMessage "> Failed to copy CSV report"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Determine final task status based on threshold
+# Threshold Validation & Final Status
 # ──────────────────────────────────────────────────────────────────────────────
+logInfoMessage "> Evaluating against failure threshold: ${HADOLINT_FAIL_THRESHOLD}"
 TASK_STATUS="success"
 FAILURE_REASON=""
 
@@ -316,10 +300,10 @@ case "${HADOLINT_FAIL_THRESHOLD}" in
         ;;
     ignore|none)
         TASK_STATUS="success"
-        logInfoMessage "Threshold set to '${HADOLINT_FAIL_THRESHOLD}' — ignoring all lint issues."
+        logInfoMessage "> Threshold set to 'ignore' — passing pipeline regardless of issues"
         ;;
     *)
-        logWarningMessage "Unknown threshold '${HADOLINT_FAIL_THRESHOLD}'. Defaulting to 'error' level."
+        logWarningMessage "> Unknown threshold '${HADOLINT_FAIL_THRESHOLD}' — defaulting to 'error'"
         if [[ ${ERROR_COUNT} -gt 0 ]]; then
             TASK_STATUS="failed"
             FAILURE_REASON="Found ${ERROR_COUNT} error-level issue(s)"
@@ -328,36 +312,28 @@ case "${HADOLINT_FAIL_THRESHOLD}" in
 esac
 
 if [[ "${TASK_STATUS}" == "success" ]]; then
-    add_event "threshold check" "Successful" "Within threshold" "No issues exceeded ${HADOLINT_FAIL_THRESHOLD} threshold"
+    add_event "THRESHOLD_VALIDATION" "Successful" "Scan passed" "Issues within acceptable threshold"
 else
-    add_event "threshold check" "Failed" "Threshold breached" "${FAILURE_REASON}"
+    add_event "THRESHOLD_VALIDATION" "Failed" "Threshold breached" "${FAILURE_REASON}"
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Build error events and write structured output JSON
+# BuildPiper Output payload
 # ──────────────────────────────────────────────────────────────────────────────
 MESSAGE="Dockerfile linting completed. Total issues: ${TOTAL_ISSUES} (Errors: ${ERROR_COUNT}, Warnings: ${WARNING_COUNT})"
 
 if [[ "${TASK_STATUS}" == "success" ]]; then
     TASK_STATUS_INT=0
     FINAL_MESSAGE="${MESSAGE}"
+    STATUS_BOOL="true"
 else
     TASK_STATUS_INT=1
     FINAL_MESSAGE="${FAILURE_REASON}. See report for details."
-    logErrorMessage "${FINAL_MESSAGE}"
-fi
-
-ERROR_EVENTS=$(echo "$EVENTS" | jq '[to_entries[] | select(.value.status == "Failed") | .key]')
-
-if [[ $TASK_STATUS_INT -eq 0 ]]; then
-    STATUS_BOOL="true"
-else
     STATUS_BOOL="false"
+    logErrorMessage "> ${FINAL_MESSAGE}"
 fi
 
 jq -n \
-  --argjson events "$EVENTS" \
-  --argjson error_events "$ERROR_EVENTS" \
   --argjson status_bool "$STATUS_BOOL" \
   --arg final_reason "$FINAL_MESSAGE" \
   --arg final_message "$FINAL_MESSAGE" \
@@ -372,9 +348,7 @@ jq -n \
       status: $status_bool,
       reason: $final_reason,
       message: $final_message,
-      events: $events,
-      current_error: (if $status_bool == "false" then $final_reason else "" end),
-      error_events: $error_events
+      current_error: (if $status_bool == "false" then $final_reason else "" end)
     },
     output_vars: {
       docker_lint: {
@@ -389,46 +363,30 @@ jq -n \
           info: $info,
           style: $style
         },
-        current_error: (if $status_bool == "false" then $final_reason else "" end),
-        error_events: $error_events
+        current_error: (if $status_bool == "false" then $final_reason else "" end)
       }
     }
   }' > "${EXEC_DIR}/${DOCKER_LINTER_OUTPUT_FILE}"
 
-logInfoMessage "Output JSON written to ${EXEC_DIR}/${DOCKER_LINTER_OUTPUT_FILE}"
+logInfoMessage "> Output JSON written to ${EXEC_DIR}/${DOCKER_LINTER_OUTPUT_FILE}"
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Generate BuildPiper output
-# ──────────────────────────────────────────────────────────────────────────────
 if [ $TASK_STATUS_INT -eq 0 ]; then
-    logInfoMessage "Congratulations! Dockerfile linting passed."
+    logInfoMessage "> Linter step passed"
     generateOutput ${ACTIVITY_SUB_TASK_CODE} true "$FINAL_MESSAGE"
 elif [ "${VALIDATION_FAILURE_ACTION:-FAILURE}" == "FAILURE" ]; then
-    logErrorMessage "Dockerfile linting FAILED. Stopping pipeline."
+    logErrorMessage "> Linter step FAILED"
     generateOutput ${ACTIVITY_SUB_TASK_CODE} false "$FINAL_MESSAGE"
     saveTaskStatus 1 "${ACTIVITY_SUB_TASK_CODE}"
     exit 1
 else
-    logWarningMessage "Dockerfile linting failed, but the step is configured as NON-BLOCKING (warning mode).
-
-  If you want the pipeline to FAIL on issues:
-  - Go to job template settings
-  - Set VALIDATION_FAILURE_ACTION = FAILURE
-
-  Current setting allows pipeline to continue."
-    add_event "validation mode" "Successful" "Non-blocking validation" "Scan failed but pipeline continued because VALIDATION_FAILURE_ACTION is not FAILURE"
+    logWarningMessage "> Linter step failed, but configured as NON-BLOCKING"
+    add_event "NON_BLOCKING_WARNING" "Successful" "Pipeline continuing" "VALIDATION_FAILURE_ACTION is not FAILURE"
     generateOutput ${ACTIVITY_SUB_TASK_CODE} false "$FINAL_MESSAGE"
 fi
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Save final task status
-# ──────────────────────────────────────────────────────────────────────────────
 saveTaskStatus $TASK_STATUS_INT "${ACTIVITY_SUB_TASK_CODE}"
 
-logInfoMessage "=============================================================="
-logInfoMessage " Dockerfile Linting Complete"
-logInfoMessage " Status: ${TASK_STATUS}"
-logInfoMessage "=============================================================="
+logInfoMessage "> Dockerfile Linting Complete (Status: ${TASK_STATUS})"
 
 if [[ "${TASK_STATUS}" == "failed" ]]; then
     exit 1
