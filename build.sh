@@ -317,62 +317,18 @@ else
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
-# BuildPiper Output payload
+# BuildPiper Output
 # ──────────────────────────────────────────────────────────────────────────────
 MESSAGE="Dockerfile linting completed. Total issues: ${TOTAL_ISSUES} (Errors: ${ERROR_COUNT}, Warnings: ${WARNING_COUNT})"
 
 if [[ "${TASK_STATUS}" == "success" ]]; then
     TASK_STATUS_INT=0
     FINAL_MESSAGE="${MESSAGE}"
-    STATUS_BOOL="true"
 else
     TASK_STATUS_INT=1
     FINAL_MESSAGE="${FAILURE_REASON}. See report for details."
-    STATUS_BOOL="false"
     logErrorMessage "> ${FINAL_MESSAGE}"
 fi
-
-# Read events already written by add_event calls, then merge into final output
-EXISTING_EVENTS=$(jq '.events // {}' "${EXEC_DIR}/${DOCKER_LINTER_OUTPUT_FILE}" 2>/dev/null || echo '{}')
-
-jq -n \
-  --argjson events "$EXISTING_EVENTS" \
-  --argjson status_bool "$STATUS_BOOL" \
-  --arg final_reason "$FINAL_MESSAGE" \
-  --arg final_message "$FINAL_MESSAGE" \
-  --arg dockerfile "$DOCKERFILE_FULL_PATH" \
-  --argjson total "$TOTAL_ISSUES" \
-  --argjson errors "$ERROR_COUNT" \
-  --argjson warnings "$WARNING_COUNT" \
-  --argjson info "$INFO_COUNT" \
-  --argjson style "$STYLE_COUNT" \
-  '{
-    events: $events,
-    build: {
-      status: $status_bool,
-      reason: $final_reason,
-      message: $final_message,
-      current_error: (if $status_bool == "false" then $final_reason else "" end)
-    },
-    output_vars: {
-      docker_lint: {
-        status: $status_bool,
-        reason: $final_reason,
-        message: $final_message,
-        scan: { dockerfile: $dockerfile },
-        results: {
-          total: $total,
-          errors: $errors,
-          warnings: $warnings,
-          info: $info,
-          style: $style
-        },
-        current_error: (if $status_bool == "false" then $final_reason else "" end)
-      }
-    }
-  }' > "${EXEC_DIR}/${DOCKER_LINTER_OUTPUT_FILE}"
-
-logInfoMessage "> Output JSON written to ${EXEC_DIR}/${DOCKER_LINTER_OUTPUT_FILE}"
 
 if [ $TASK_STATUS_INT -eq 0 ]; then
     logInfoMessage "> Linter step passed"
