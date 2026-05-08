@@ -332,7 +332,11 @@ else
     logErrorMessage "> ${FINAL_MESSAGE}"
 fi
 
+# Read events already written by add_event calls, then merge into final output
+EXISTING_EVENTS=$(jq '.events // {}' "${EXEC_DIR}/${DOCKER_LINTER_OUTPUT_FILE}" 2>/dev/null || echo '{}')
+
 jq -n \
+  --argjson events "$EXISTING_EVENTS" \
   --argjson status_bool "$STATUS_BOOL" \
   --arg final_reason "$FINAL_MESSAGE" \
   --arg final_message "$FINAL_MESSAGE" \
@@ -343,6 +347,7 @@ jq -n \
   --argjson info "$INFO_COUNT" \
   --argjson style "$STYLE_COUNT" \
   '{
+    events: $events,
     build: {
       status: $status_bool,
       reason: $final_reason,
